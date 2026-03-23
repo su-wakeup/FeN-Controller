@@ -1,0 +1,47 @@
+# FeN Robot Controller - ROS Bridge 配置
+# ─────────────────────────────────────────────────────────────
+
+network:
+  udp_listen_port: 9001       # 接收手柄数据
+  udp_status_port: 9002       # 发送状态回 ESP32
+  esp32_ip: ""                # 留空则自动从包来源 IP 推断
+  bind_ip: "0.0.0.0"
+
+arms:
+  left:
+    ip: "192.168.1.202"
+    dof: 6                    # 6 或 7
+    tcp_offset: [0, 0, 0, 0, 0, 0]   # 末端工具偏移 [x,y,z,roll,pitch,yaw] mm/deg
+  right:
+    ip: "192.168.1.201"
+    dof: 6
+    tcp_offset: [0, 0, 0, 0, 0, 0]
+
+control:
+  cart_speed: 50              # mm/s 笛卡尔平移速度
+  cart_accel: 500             # mm/s²
+  orient_speed: 30            # deg/s 姿态旋转速度
+  joint_speed: 20             # deg/s 关节速度
+  deadzone: 0.06              # 摇杆死区（归一化 0-1）
+  send_interval: 0.02         # 20ms = 50Hz
+
+gripper:
+  type: "xarm"                # xarm | bio | vacuum
+  open_pos: 800               # xArm 夹爪张开位置 (0-850)
+  close_pos: 0
+  open_force: 20
+  close_force: 50
+  speed: 5000
+
+ros:
+  version: "auto"             # auto | ros1 | ros2 | none
+  namespace: "/fen"
+  left_arm_frame: "left_base_link"
+  right_arm_frame: "right_base_link"
+
+discovery:
+  enabled: true
+  subnet: "192.168.1"         # 扫描网段
+  xarm_port: 18333            # xArm 控制器监听端口
+  scan_timeout: 0.3           # 每个 IP 的超时（秒）
+  scan_threads: 30
