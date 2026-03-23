@@ -29,6 +29,7 @@ void handleConfigMenu(const JoyState& js);
 void buildAndSend(const JoyState& js);
 uint8_t buildButtons(const JoyState& js, bool frontBtn);
 CtrlMode resolveMode(const JoyState& js, bool frontBtn);
+void adjustConfigItem(int item, int dir);
 
 // ─── 初始化 ──────────────────────────────────────────────────
 void setup() {

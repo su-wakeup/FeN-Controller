@@ -130,18 +130,19 @@ class StatusPacket:
     def error(self):           return bool(self.flags & 0x08)
 
     def pack(self) -> bytes:
-        data = bytearray(32)
+        data = bytearray(33)
         data[0] = 0xFF
         data[1] = 0xFF
         data[2] = self.flags
-        struct.pack_into("<fff", data, 3,  *self.l_pos)
-        struct.pack_into("<fff", data, 15, *self.r_pos)
+        struct.pack_into("<fff", data, 3,  *self.l_pos)   # bytes 3-14
+        struct.pack_into("<fff", data, 15, *self.r_pos)   # bytes 15-26
         data[27] = self.l_state
         data[28] = self.r_state
         data[29] = self.l_gripper
-        data[30] = self.battery
+        data[30] = self.r_gripper
+        data[31] = self.battery
         cs = 0
-        for b in data[:31]:
+        for b in data[:32]:
             cs ^= b
-        data[31] = cs
+        data[32] = cs
         return bytes(data)

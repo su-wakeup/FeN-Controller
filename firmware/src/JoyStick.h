@@ -87,7 +87,7 @@ private:
         Wire.beginTransmission(JOYSTICK_I2C_ADDR);
         Wire.write(reg);
         Wire.endTransmission(false);
-        Wire.requestFrom(JOYSTICK_I2C_ADDR, (uint8_t)2);
+        Wire.requestFrom((int)JOYSTICK_I2C_ADDR, (int)2);
         if (Wire.available() < 2) return 2048;
         uint8_t lo = Wire.read();
         uint8_t hi = Wire.read();
@@ -98,7 +98,7 @@ private:
         Wire.beginTransmission(JOYSTICK_I2C_ADDR);
         Wire.write(reg);
         Wire.endTransmission(false);
-        Wire.requestFrom(JOYSTICK_I2C_ADDR, (uint8_t)1);
+        Wire.requestFrom((int)JOYSTICK_I2C_ADDR, (int)1);
         return Wire.available() ? Wire.read() : 0;
     }
 

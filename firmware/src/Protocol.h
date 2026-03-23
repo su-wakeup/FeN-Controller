@@ -55,7 +55,7 @@ struct StatusPacket {
     uint8_t  checksum;
 };
 #pragma pack(pop)
-static_assert(sizeof(StatusPacket) == 32, "StatusPacket size mismatch");
+static_assert(sizeof(StatusPacket) == 33, "StatusPacket size mismatch");
 
 // ─── 校验和 ──────────────────────────────────────────────────
 inline uint8_t calcChecksum(const uint8_t* data, size_t len) {
