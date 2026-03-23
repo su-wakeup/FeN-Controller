@@ -1,4 +1,5 @@
 #include <M5Unified.h>
+#include <WiFi.h>
 #include "Protocol.h"
 #include "Config.h"
 #include "JoyStick.h"
@@ -41,22 +42,40 @@ void setup() {
     cfgMgr.load();
     disp.begin();
 
-    // 初始化摇杆（标定中心）
-    if (!joy.begin()) {
-        disp.showMessage("Joystick ERR!", C_RED, 2000);
+    // 初始化摇杆（I2C 地址 0x59，重试 3 次）
+    bool joyOk = false;
+    for (int attempt = 0; attempt < 3 && !joyOk; attempt++) {
+        joyOk = joy.begin();
+        if (!joyOk) delay(300);
+    }
+    if (!joyOk) {
+        disp.showMessage("I2C Err 0x59", C_RED, 0);  // 0=不自动消失
+        delay(2000);
     } else {
         delay(200);
         joy.calibrate();
     }
 
-    // 连接 WiFi
-    bool wifiOk = net.connectWifi(cfgMgr.cfg, 8000);
+    // 连接 WiFi（有动画更新连接点）
+    if (strlen(cfgMgr.cfg.wifi_ssid) > 0) {
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(cfgMgr.cfg.wifi_ssid, cfgMgr.cfg.wifi_pass);
+        uint32_t t0 = millis();
+        int dots = 0;
+        while (WiFi.status() != WL_CONNECTED && (millis() - t0) < 8000) {
+            disp.updateConnecting(dots % 4);
+            dots++;
+            delay(500);
+        }
+    }
+    bool wifiOk = (WiFi.status() == WL_CONNECTED);
+    if (wifiOk) net.markConnected();
+
     if (!wifiOk) {
         // 无 WiFi 配置 → AP 模式 + 网页配置
-        // 先播星战字幕动画（约 4 秒），然后显示静态提示界面
-        disp.showWifiCrawl();
-        disp.showWifiSetup(cfgMgr.cfg.wifi_ssid[0] ? cfgMgr.cfg.wifi_ssid : "Not set");
-        net.startAPMode("FeN-Controller");
+        disp.showWifiScroll();
+        disp.showWifiSetup();
+        net.startAPMode("FeN-Ctrl");
         // 等待用户通过网页配置后重启
         while (true) {
             net.handleWebServer();

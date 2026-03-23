@@ -37,8 +37,14 @@ public:
         return connected;
     }
 
+    // main.cpp 自管理 WiFi 连接后调用此函数标记已连接
+    void markConnected() {
+        connected = true;
+        _udp.begin(UDP_PORT_STATUS);
+    }
+
     // 启动 AP 模式（用于首次配置 WiFi）
-    void startAPMode(const char* apName = "FeN-Controller") {
+    void startAPMode(const char* apName = "FeN-Ctrl") {
         WiFi.mode(WIFI_AP);
         WiFi.softAP(apName, "fenrobot1");
         delay(100);  // 等待 AP 接口就绪

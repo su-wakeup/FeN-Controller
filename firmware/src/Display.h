@@ -2,6 +2,7 @@
 #include <M5Unified.h>
 #include "Protocol.h"
 #include "Config.h"
+#include "logo_panbotica.h"
 
 // AtomS3 LCD: 128x128 像素
 #define LCD_W  128
@@ -16,6 +17,8 @@
 #define C_WHITE     0xFFFF
 #define C_GRAY      0x8410
 #define C_DARK_GRAY 0x4208
+#define C_CYAN      0x07FF
+#define C_ORANGE    0xFD20
 
 class DisplayManager {
 public:
@@ -25,205 +28,332 @@ public:
         showBoot();
     }
 
+    // ── 开机动画 ──────────────────────────────────────────────────
+    // 机器人剪影 + "FeN RC" 标题 + Panbotica logo
+    // 动画约 2 秒：双臂从中间向两侧展开，标题淡入
     void showBoot() {
-        M5.Lcd.fillScreen(C_BG);
-        M5.Lcd.setTextDatum(MC_DATUM);
-        M5.Lcd.setTextColor(C_ACCENT);
-        M5.Lcd.setTextSize(2);
-        M5.Lcd.drawString("FeN", LCD_W/2, 45);
-        M5.Lcd.setTextSize(1);
-        M5.Lcd.setTextColor(C_GRAY);
-        M5.Lcd.drawString("Dual Arm Robot", LCD_W/2, 68);
-        M5.Lcd.drawString("Panbotica", LCD_W/2, 82);
-        M5.Lcd.setTextColor(C_WHITE);
-        M5.Lcd.drawString("Connecting...", LCD_W/2, 100);
-    }
-
-    // 星战字幕滚动动效：近大远小，向上消失在灭点
-    // 调用一次播放完整动画（约 4 秒），用于 WiFi AP 模式等待期间
-    void showWifiCrawl() {
-        // 字幕内容（从下往上出现）
-        const char* lines[] = {
-            "FeN ROBOT",
-            "WIFI SETUP",
-            "",
-            "Connect to:",
-            "FeN-Controller",
-            "pw: fenrobot1",
-            "",
-            "Open browser:",
-            "192.168.4.1",
-            "",
-            "Waiting...",
-        };
-        const int N = 11;
-
-        // 使用 Sprite 双缓冲避免闪烁
         LGFX_Sprite spr(&M5.Lcd);
         spr.createSprite(LCD_W, LCD_H);
 
-        const int VANISH_Y  = 20;   // 灭点 Y 坐标（屏幕上方）
-        const int START_Y   = LCD_H + N * 20;  // 字幕起始位置（屏幕下方外）
-        const float SCROLL_SPEED = 1.2f;       // 每帧滚动像素
+        // 机器人剪影各部件坐标（以 cx=64, cy=62 为中心）
+        const int cx = 64;
+        const int bodyY = 52;
 
-        float offset = 0;
-        uint32_t lastFrame = millis();
-
-        while (offset < (float)(N * 20 + LCD_H)) {
-            uint32_t now = millis();
-            float dt = (now - lastFrame) / 16.0f;  // 相对于 ~60fps 的时间系数
-            lastFrame = now;
-            offset += SCROLL_SPEED * dt;
+        for (int frame = 0; frame < 48; frame++) {
+            float t = frame / 47.0f;  // 0→1
+            // 缓动：ease-out cubic
+            float ease = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
 
             spr.fillScreen(C_BG);
 
-            // 绘制星点背景
-            spr.fillRect(0, 0, LCD_W, VANISH_Y, TFT_BLACK);
+            // 星点背景（3颗固定小星）
+            spr.fillCircle(15, 20, 1, C_DARK_GRAY);
+            spr.fillCircle(100, 35, 1, C_DARK_GRAY);
+            spr.fillCircle(55, 10, 1, C_DARK_GRAY);
 
-            for (int i = 0; i < N; i++) {
-                // 每行在"世界空间"的 Y 位置（相对于灭点）
-                float worldY = (float)(START_Y - i * 22) - offset;
+            // ── 机器人主体剪影（简洁几何风格）──
+            uint16_t bodyCol = spr.color565(
+                (uint8_t)(30 + ease * 80),
+                (uint8_t)(20 + ease * 40),
+                (uint8_t)(60 + ease * 120));
 
-                // 透视投影：worldY 越大（越靠下）字越大
-                // 灭点在 VANISH_Y，底部 LCD_H 处为最大尺寸
-                float t = (worldY - VANISH_Y) / (float)(LCD_H - VANISH_Y);
-                if (t <= 0.0f || t > 1.4f) continue;  // 超出视锥
+            // 头部
+            spr.fillRoundRect(cx - 8, bodyY - 22, 16, 14, 3, bodyCol);
+            // 颈
+            spr.fillRect(cx - 3, bodyY - 9, 6, 5, bodyCol);
+            // 躯干
+            spr.fillRoundRect(cx - 12, bodyY - 4, 24, 20, 3, bodyCol);
+            // 腿
+            spr.fillRect(cx - 9, bodyY + 16, 6, 10, bodyCol);
+            spr.fillRect(cx + 3,  bodyY + 16, 6, 10, bodyCol);
+            // 脚
+            spr.fillRect(cx - 11, bodyY + 25, 9, 4, bodyCol);
+            spr.fillRect(cx + 2,  bodyY + 25, 9, 4, bodyCol);
 
-                int screenY = (int)(VANISH_Y + t * (LCD_H - VANISH_Y));
-                if (screenY < VANISH_Y || screenY > LCD_H + 16) continue;
-
-                // 字体大小随 t 线性变化（0.5 ~ 2）
-                float sizeF = 0.4f + t * 1.6f;
-                int   sz    = (sizeF > 1.5f) ? 2 : 1;
-
-                // 颜色：顶部（远处）暗，底部（近处）亮
-                uint8_t bright = (uint8_t)(60 + t * 195);
-                uint16_t color;
-                if (i == 0 || i == 1) {
-                    // 标题行：金黄色
-                    color = spr.color565(bright, (uint8_t)(bright * 0.85f), 0);
-                } else if (lines[i][0] == '\0') {
-                    continue;
-                } else if (strstr(lines[i], "192.168") || strstr(lines[i], "FeN-C")) {
-                    // 高亮行：紫色
-                    color = spr.color565((uint8_t)(bright * 0.8f), (uint8_t)(bright * 0.6f), bright);
-                } else {
-                    color = spr.color565(bright, bright, bright);
-                }
-
-                spr.setTextSize(sz);
-                spr.setTextColor(color);
-                spr.setTextDatum(MC_DATUM);
-                spr.drawString(lines[i], LCD_W / 2, screenY);
+            // 眼睛（动画结束后亮起）
+            if (ease > 0.6f) {
+                uint8_t eyeB = (uint8_t)((ease - 0.6f) / 0.4f * 255);
+                uint16_t eyeCol = spr.color565(0, eyeB, eyeB);
+                spr.fillCircle(cx - 3, bodyY - 16, 2, eyeCol);
+                spr.fillCircle(cx + 3, bodyY - 16, 2, eyeCol);
             }
 
-            // 顶部黑色遮罩（制造消失感）
-            spr.fillRect(0, 0, LCD_W, VANISH_Y, TFT_BLACK);
-            // 底部轻微渐变遮罩（让新文字从下方淡入）
-            for (int y = LCD_H - 20; y < LCD_H; y++) {
-                uint8_t alpha = (uint8_t)((y - (LCD_H - 20)) * 12);
+            // ── 双臂：从躯干中心向两侧展开 ──
+            // 手臂展开距离随 ease 变化（0 → 最大）
+            int armSpread = (int)(ease * 26);
+            // 左臂（分3段：上臂、肘、前臂）
+            int lShoulderX = cx - 12;
+            int lElbowX    = lShoulderX - armSpread;
+            int lWristX    = lElbowX - (int)(ease * 8);
+            int armY       = bodyY + 2;
+            spr.drawLine(lShoulderX, armY, lElbowX, armY + 8, bodyCol);
+            spr.drawLine(lElbowX, armY + 8, lWristX, armY + 14, bodyCol);
+            spr.fillCircle(lWristX, armY + 14, 2, bodyCol);  // 末端效应器
+            // 右臂
+            int rShoulderX = cx + 12;
+            int rElbowX    = rShoulderX + armSpread;
+            int rWristX    = rElbowX + (int)(ease * 8);
+            spr.drawLine(rShoulderX, armY, rElbowX, armY + 8, bodyCol);
+            spr.drawLine(rElbowX, armY + 8, rWristX, armY + 14, bodyCol);
+            spr.fillCircle(rWristX, armY + 14, 2, bodyCol);
+
+            // ── 标题文字（ease > 0.3 开始淡入）──
+            if (ease > 0.3f) {
+                float ta = (ease - 0.3f) / 0.7f;
+                uint8_t tb = (uint8_t)(ta * 255);
+                // "FeN" 大字（紫色）
+                uint16_t titleCol = spr.color565(
+                    (uint8_t)(tb * 0.66f),
+                    (uint8_t)(tb * 0.25f),
+                    tb);
+                spr.setTextDatum(MC_DATUM);
+                spr.setTextSize(2);
+                spr.setTextColor(titleCol);
+                spr.drawString("FeN", cx, 10);
+
+                // "RC" 小字（白色，同行右侧）
+                uint16_t rcCol = spr.color565(tb, tb, tb);
+                spr.setTextSize(1);
+                spr.setTextColor(rcCol);
+                spr.drawString("RC", cx + 18, 10);
+            }
+
+            // ── Panbotica logo（最后阶段显示在底部）──
+            if (ease > 0.75f) {
+                uint8_t la = (uint8_t)((ease - 0.75f) / 0.25f * 255);
+                // logo 居中
+                int lx = (LCD_W - LOGO_W) / 2;
+                int ly = LCD_H - LOGO_H - 2;
+                for (int row = 0; row < LOGO_H; row++) {
+                    for (int col = 0; col < LOGO_W; col++) {
+                        uint16_t px = pgm_read_word(&PANBOTICA_LOGO[row][col]);
+                        if (px != 0) {
+                            // 与背景混合以实现淡入
+                            uint8_t r = ((px >> 11) & 0x1F) * la / 255;
+                            uint8_t g = ((px >> 5)  & 0x3F) * la / 255;
+                            uint8_t b = ( px        & 0x1F) * la / 255;
+                            spr.drawPixel(lx + col, ly + row,
+                                spr.color565(r << 3, g << 2, b << 3));
+                        }
+                    }
+                }
+            }
+
+            spr.pushSprite(0, 0);
+            delay(42);  // ~24fps，总时长约 2 秒
+        }
+
+        spr.deleteSprite();
+
+        // 动画结束，绘制静态 boot 画面等待后续步骤
+        _drawBootStatic(0);
+    }
+
+    // 更新 boot 静态页面的连接状态（0=初始, 1=., 2=.., 3=...）
+    void updateConnecting(int dots) {
+        _drawBootStatic(dots);
+    }
+
+    // ── WiFi 滚动说明 ─────────────────────────────────────────────
+    // 简洁上滚，textSize(2)，每行≤10字符，阅读速度舒适
+    // 调用一次播放完整动画（约 6 秒）
+    void showWifiScroll() {
+        const char* lines[] = {
+            "WiFi Setup",
+            "",
+            "1. Connect",
+            "   WiFi:",
+            "FeN-Ctrl",
+            "pw:fenrobot1",
+            "",
+            "2. Open",
+            "   browser:",
+            "192.168.4.1",
+            "",
+            "3. Enter",
+            "   settings",
+            "   & save",
+            "",
+            "Waiting...",
+        };
+        const int N = 16;
+        const int LINE_H = 18;       // textSize(2) 行高约 16px + 2px 间距
+        const float SPEED = 0.5f;    // px/frame，舒适阅读速度
+
+        LGFX_Sprite spr(&M5.Lcd);
+        spr.createSprite(LCD_W, LCD_H);
+
+        // 总滚动距离：所有行从屏幕底部滚出到顶部
+        float totalScroll = (float)(N * LINE_H + LCD_H);
+        float offset = 0;
+        uint32_t lastFrame = millis();
+
+        while (offset < totalScroll) {
+            uint32_t now = millis();
+            float dt = (float)(now - lastFrame) / 16.0f;
+            lastFrame = now;
+            offset += SPEED * dt;
+
+            spr.fillScreen(C_BG);
+
+            for (int i = 0; i < N; i++) {
+                int screenY = (int)(LCD_H - offset + i * LINE_H);
+                if (screenY < -LINE_H || screenY > LCD_H) continue;
+                if (lines[i][0] == '\0') continue;
+
+                // 颜色区分：标题行、高亮行、普通行
+                uint16_t col;
+                if (i == 0) {
+                    col = C_YELLOW;
+                } else if (strstr(lines[i], "FeN-Ctrl") || strstr(lines[i], "192.168")) {
+                    col = C_ACCENT;
+                } else if (lines[i][0] >= '1' && lines[i][0] <= '9' && lines[i][1] == '.') {
+                    col = C_CYAN;
+                } else {
+                    col = C_WHITE;
+                }
+
+                spr.setTextSize(2);
+                spr.setTextColor(col);
+                spr.setTextDatum(MC_DATUM);
+                spr.drawString(lines[i], LCD_W / 2, screenY + LINE_H / 2);
+            }
+
+            // 顶/底渐变遮罩
+            for (int y = 0; y < 16; y++) {
+                uint16_t mask = spr.color565(0, 0, 0);
+                uint8_t a = (uint8_t)((16 - y) * 14);
+                (void)a;  // 简单用纯黑线模拟渐变
+                spr.drawFastHLine(0, y, LCD_W, mask);
+            }
+            for (int y = LCD_H - 16; y < LCD_H; y++) {
                 spr.drawFastHLine(0, y, LCD_W, spr.color565(0, 0, 0));
             }
 
             spr.pushSprite(0, 0);
-            delay(16);  // ~60fps
+            delay(16);
         }
 
         spr.deleteSprite();
     }
 
-    // WiFi 设置静态界面（动画结束后或跳过时显示）
-    void showWifiSetup(const char* ssid) {
+    // WiFi 设置静态界面（动画结束后显示）
+    void showWifiSetup() {
         M5.Lcd.fillScreen(TFT_BLACK);
 
-        // 顶部标题栏（size 2，明显可读）
+        // 顶部标题栏
+        M5.Lcd.fillRect(0, 0, LCD_W, 18, C_ACCENT);
         M5.Lcd.setTextDatum(MC_DATUM);
-        M5.Lcd.setTextColor(C_YELLOW);
-        M5.Lcd.setTextSize(2);
-        M5.Lcd.drawString("WiFi Setup", LCD_W / 2, 14);
+        M5.Lcd.setTextColor(C_WHITE, C_ACCENT);
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.drawString("WiFi Setup", LCD_W / 2, 9);
 
-        // 分割线
-        M5.Lcd.drawFastHLine(0, 26, LCD_W, C_GRAY);
-
+        // 连接提示
         M5.Lcd.setTextDatum(TL_DATUM);
+        M5.Lcd.setTextSize(1);
+
+        M5.Lcd.setTextColor(C_GRAY, TFT_BLACK);
+        M5.Lcd.drawString("Connect WiFi:", 4, 24);
+        M5.Lcd.setTextColor(C_WHITE, TFT_BLACK);
         M5.Lcd.setTextSize(2);
+        M5.Lcd.drawString("FeN-Ctrl", 4, 34);
 
-        // "Connect:" 提示
-        M5.Lcd.setTextColor(C_GRAY);
-        M5.Lcd.drawString("Connect:", 4, 32);
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.setTextColor(C_GRAY, TFT_BLACK);
+        M5.Lcd.drawString("Password:", 4, 54);
+        M5.Lcd.setTextColor(C_GRAY, TFT_BLACK);
+        M5.Lcd.drawString("fenrobot1", 4, 64);
 
-        // WiFi 名（高亮）
-        M5.Lcd.setTextColor(C_WHITE);
-        M5.Lcd.drawString("FeN-Ctrl", 4, 52);
+        M5.Lcd.drawFastHLine(0, 76, LCD_W, C_DARK_GRAY);
 
-        // 分割线
-        M5.Lcd.drawFastHLine(0, 72, LCD_W, C_GRAY);
+        M5.Lcd.setTextColor(C_GRAY, TFT_BLACK);
+        M5.Lcd.drawString("Open browser:", 4, 82);
+        // IP 用 textSize(1) 确保不溢出，颜色高亮
+        M5.Lcd.setTextColor(C_ACCENT, TFT_BLACK);
+        M5.Lcd.setTextSize(2);
+        M5.Lcd.drawString("192.168.4.1", 4, 92);
 
-        // "Open:" 提示
-        M5.Lcd.setTextColor(C_GRAY);
-        M5.Lcd.drawString("Open:", 4, 78);
-
-        // IP 地址（紫色高亮，size 2 完全放得下）
-        M5.Lcd.setTextColor(C_ACCENT);
-        M5.Lcd.drawString("192.168.4.1", 4, 98);
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.setTextColor(C_YELLOW, TFT_BLACK);
+        M5.Lcd.setTextDatum(MC_DATUM);
+        M5.Lcd.drawString("Waiting...", LCD_W / 2, 116);
     }
 
-    // 主界面：显示双臂状态
+    // ── 主界面：左右分栏显示双臂状态 ─────────────────────────────
     void showMain(CtrlMode mode, const StatusPacket& st,
                   int16_t lx, int16_t ly, int16_t rx, int16_t ry) {
         M5.Lcd.fillScreen(C_BG);
 
-        // 顶部：模式栏
-        M5.Lcd.fillRect(0, 0, LCD_W, 16, C_ACCENT);
+        // ── 顶部模式栏（全宽）──
+        M5.Lcd.fillRect(0, 0, LCD_W, 14, C_ACCENT);
         M5.Lcd.setTextDatum(MC_DATUM);
         M5.Lcd.setTextColor(C_WHITE, C_ACCENT);
         M5.Lcd.setTextSize(1);
-        M5.Lcd.drawString(modeName(mode), LCD_W/2, 8);
+        M5.Lcd.drawString(modeName(mode), LCD_W / 2, 7);
 
-        // 连接状态指示点
+        // ── 连接状态指示点 ──
         uint16_t lc = (st.flags & 0x01) ? C_GREEN : C_RED;
         uint16_t rc = (st.flags & 0x02) ? C_GREEN : C_RED;
-        M5.Lcd.fillCircle(6,  8, 3, lc);
-        M5.Lcd.fillCircle(122, 8, 3, rc);
+        M5.Lcd.fillCircle(4,  7, 3, lc);
+        M5.Lcd.fillCircle(123, 7, 3, rc);
 
-        // 左臂坐标
+        // ── 中央分隔线 ──
+        M5.Lcd.drawFastVLine(LCD_W / 2, 14, 96, C_DARK_GRAY);
+
+        // ── 左臂（左半屏）──
+        const int LX = 2;
         M5.Lcd.setTextDatum(TL_DATUM);
-        M5.Lcd.setTextColor(0x07FF, C_BG);  // 青色
+        M5.Lcd.setTextColor(C_CYAN, C_BG);
         M5.Lcd.setTextSize(1);
-        M5.Lcd.drawString("LEFT", 2, 20);
-        drawArmPos(2, 30, st.l_pos, st.l_state);
+        M5.Lcd.drawString("LEFT", LX, 17);
+        drawArmPanel(LX, 27, st.l_pos, st.l_state);
 
-        // 右臂坐标
-        M5.Lcd.setTextColor(0xFD20, C_BG);  // 橙色
-        M5.Lcd.drawString("RIGHT", 2, 70);
-        drawArmPos(2, 80, st.r_pos, st.r_state);
+        // 左摇杆可视化
+        drawMiniStick(14, 104, lx, ly, C_CYAN);
+        // 左夹爪
+        drawGripper(36, 104, st.l_gripper, C_CYAN);
 
-        // 摇杆可视化（小十字）
-        drawMiniStick(18, 113, lx, ly, 0x07FF);
-        drawMiniStick(110, 113, rx, ry, 0xFD20);
+        // ── 右臂（右半屏）──
+        const int RX = LCD_W / 2 + 3;
+        M5.Lcd.setTextColor(C_ORANGE, C_BG);
+        M5.Lcd.drawString("RIGHT", RX, 17);
+        drawArmPanel(RX, 27, st.r_pos, st.r_state);
 
-        // 夹爪状态
-        drawGripper(40, 110, st.l_gripper, 0x07FF);
-        drawGripper(80, 110, st.r_gripper, 0xFD20);
+        // 右摇杆可视化
+        drawMiniStick(114, 104, rx, ry, C_ORANGE);
+        // 右夹爪
+        drawGripper(88, 104, st.r_gripper, C_ORANGE);
 
-        // 急停时覆盖红色警告
+        // ── 底部分隔线 ──
+        M5.Lcd.drawFastHLine(0, 116, LCD_W, C_DARK_GRAY);
+
+        // ── 关节模式：显示当前关节编号 ──
+        if (mode == MODE_JOINT) {
+            char jbuf[12];
+            snprintf(jbuf, 12, "J%d", (int)st.flags >> 4 & 0x0F);
+            M5.Lcd.setTextDatum(MC_DATUM);
+            M5.Lcd.setTextColor(C_YELLOW, C_BG);
+            M5.Lcd.drawString(jbuf, LCD_W / 2, 122);
+        }
+
+        // ── 急停覆盖 ──
         if (mode == MODE_ESTOP) {
-            M5.Lcd.fillRect(0, 50, LCD_W, 20, C_RED);
+            M5.Lcd.fillRect(0, 48, LCD_W, 22, C_RED);
             M5.Lcd.setTextDatum(MC_DATUM);
             M5.Lcd.setTextColor(C_WHITE, C_RED);
-            M5.Lcd.setTextSize(1);
-            M5.Lcd.drawString("!! E-STOP !!", LCD_W/2, 60);
+            M5.Lcd.setTextSize(2);
+            M5.Lcd.drawString("E-STOP", LCD_W / 2, 59);
         }
     }
 
-    // 配置菜单
+    // ── 配置菜单 ──────────────────────────────────────────────────
     void showConfig(int item, const AppConfig& cfg) {
         M5.Lcd.fillScreen(C_BG);
-        M5.Lcd.fillRect(0, 0, LCD_W, 16, 0x4010);
+        M5.Lcd.fillRect(0, 0, LCD_W, 14, 0x4010);
         M5.Lcd.setTextDatum(MC_DATUM);
         M5.Lcd.setTextColor(C_YELLOW, 0x4010);
         M5.Lcd.setTextSize(1);
-        M5.Lcd.drawString("CONFIG", LCD_W/2, 8);
+        M5.Lcd.drawString("CONFIG", LCD_W / 2, 7);
 
         const char* items[] = {
             "WiFi SSID",
@@ -239,23 +369,22 @@ public:
         };
         const int N = 10;
         for (int i = 0; i < N; i++) {
-            int y = 20 + i * 11;
+            int y = 17 + i * 11;
             if (y > 118) break;
             bool sel = (i == item);
-            M5.Lcd.fillRect(0, y-1, LCD_W, 11, sel ? C_ACCENT : C_BG);
+            M5.Lcd.fillRect(0, y - 1, LCD_W, 11, sel ? C_ACCENT : C_BG);
             M5.Lcd.setTextDatum(TL_DATUM);
             M5.Lcd.setTextColor(sel ? C_WHITE : C_GRAY, sel ? C_ACCENT : C_BG);
             M5.Lcd.drawString(items[i], 6, y);
-            // 当前值（右侧）
             M5.Lcd.setTextDatum(TR_DATUM);
             M5.Lcd.setTextColor(sel ? C_YELLOW : C_DARK_GRAY, sel ? C_ACCENT : C_BG);
-            switch(i) {
+            switch (i) {
                 case 0: M5.Lcd.drawString(cfg.wifi_ssid[0] ? cfg.wifi_ssid : "?", 124, y); break;
                 case 1: M5.Lcd.drawString(cfg.pc_ip, 124, y); break;
                 case 2: M5.Lcd.drawString(cfg.left_arm_ip, 124, y); break;
                 case 3: M5.Lcd.drawString(cfg.right_arm_ip, 124, y); break;
-                case 4: { char buf[8]; snprintf(buf, 8, "%.0f", cfg.speed_cart);  M5.Lcd.drawString(buf, 124, y); break; }
-                case 5: { char buf[8]; snprintf(buf, 8, "%.0f", cfg.speed_orient); M5.Lcd.drawString(buf, 124, y); break; }
+                case 4: { char b[8]; snprintf(b, 8, "%.0f", cfg.speed_cart);   M5.Lcd.drawString(b, 124, y); break; }
+                case 5: { char b[8]; snprintf(b, 8, "%.0f", cfg.speed_orient); M5.Lcd.drawString(b, 124, y); break; }
                 case 6: M5.Lcd.drawString(gripperName(cfg.gripper_type), 124, y); break;
                 case 7: M5.Lcd.drawString(cfg.auto_discover ? "ON" : "OFF", 124, y); break;
             }
@@ -276,44 +405,119 @@ public:
 
     void showMessage(const char* msg, uint16_t color = C_WHITE, int durationMs = 1500) {
         M5.Lcd.fillRect(0, 50, LCD_W, 28, C_BG);
-        M5.Lcd.fillRect(2, 52, LCD_W-4, 24, 0x2104);
+        M5.Lcd.fillRect(2, 52, LCD_W - 4, 24, 0x2104);
         M5.Lcd.setTextDatum(MC_DATUM);
         M5.Lcd.setTextColor(color, 0x2104);
         M5.Lcd.setTextSize(1);
-        M5.Lcd.drawString(msg, LCD_W/2, 64);
+        M5.Lcd.drawString(msg, LCD_W / 2, 64);
         if (durationMs > 0) delay(durationMs);
     }
 
 private:
-    void drawArmPos(int x, int y, const float pos[3], uint8_t state) {
-        char buf[20];
-        uint16_t sc = (state == 1) ? C_YELLOW : (state == 2 ? C_RED : C_WHITE);
-        M5.Lcd.setTextColor(sc, C_BG);
+    // 静态 boot 画面（动画后持续显示，dots=0~3 控制 "..." 动画）
+    void _drawBootStatic(int dots) {
+        M5.Lcd.fillScreen(C_BG);
+
+        // 标题
+        M5.Lcd.setTextDatum(MC_DATUM);
+        M5.Lcd.setTextColor(C_ACCENT, C_BG);
+        M5.Lcd.setTextSize(2);
+        M5.Lcd.drawString("FeN", 50, 10);
         M5.Lcd.setTextSize(1);
-        snprintf(buf, 20, "X%+.0f", pos[0]);
-        M5.Lcd.drawString(buf, x, y);
-        snprintf(buf, 20, "Y%+.0f", pos[1]);
-        M5.Lcd.drawString(buf, x, y+10);
-        snprintf(buf, 20, "Z%+.0f", pos[2]);
-        M5.Lcd.drawString(buf, x, y+20);
+        M5.Lcd.setTextColor(C_WHITE, C_BG);
+        M5.Lcd.drawString("RC", 79, 6);
+
+        // 副标题
+        M5.Lcd.setTextColor(C_GRAY, C_BG);
+        M5.Lcd.drawString("Dual Arm Robot", LCD_W / 2, 24);
+
+        // 机器人简化剪影（静态，与动画结束帧一致）
+        const int cx = 64, bodyY = 72;
+        uint16_t col = M5.Lcd.color565(110, 60, 180);
+        M5.Lcd.fillRoundRect(cx - 8,  bodyY - 22, 16, 14, 3, col);
+        M5.Lcd.fillRect     (cx - 3,  bodyY -  9,  6,  5,    col);
+        M5.Lcd.fillRoundRect(cx - 12, bodyY -  4, 24, 20, 3, col);
+        M5.Lcd.fillRect     (cx - 9,  bodyY + 16,  6, 10,    col);
+        M5.Lcd.fillRect     (cx + 3,  bodyY + 16,  6, 10,    col);
+        M5.Lcd.fillRect     (cx - 11, bodyY + 25,  9,  4,    col);
+        M5.Lcd.fillRect     (cx + 2,  bodyY + 25,  9,  4,    col);
+        // 眼睛
+        M5.Lcd.fillCircle(cx - 3, bodyY - 16, 2, C_CYAN);
+        M5.Lcd.fillCircle(cx + 3, bodyY - 16, 2, C_CYAN);
+        // 双臂（展开后固定位置）
+        M5.Lcd.drawLine(cx - 12, bodyY + 2, cx - 38, bodyY + 10, col);
+        M5.Lcd.drawLine(cx - 38, bodyY + 10, cx - 46, bodyY + 16, col);
+        M5.Lcd.fillCircle(cx - 46, bodyY + 16, 2, col);
+        M5.Lcd.drawLine(cx + 12, bodyY + 2, cx + 38, bodyY + 10, col);
+        M5.Lcd.drawLine(cx + 38, bodyY + 10, cx + 46, bodyY + 16, col);
+        M5.Lcd.fillCircle(cx + 46, bodyY + 16, 2, col);
+
+        // Panbotica logo
+        int logoX = (LCD_W - LOGO_W) / 2;
+        int logoY = LCD_H - LOGO_H - 2;
+        for (int row = 0; row < LOGO_H; row++) {
+            for (int c = 0; c < LOGO_W; c++) {
+                uint16_t px = pgm_read_word(&PANBOTICA_LOGO[row][c]);
+                if (px != 0) {
+                    M5.Lcd.drawPixel(logoX + c, logoY + row, px);
+                }
+            }
+        }
+
+        // 连接中提示
+        char buf[20];
+        snprintf(buf, 20, "Connecting%.*s", dots, "...");
+        M5.Lcd.setTextDatum(MC_DATUM);
+        M5.Lcd.setTextColor(C_WHITE, C_BG);
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.drawString(buf, LCD_W / 2, LCD_H - LOGO_H - 12);
+    }
+
+    // 单臂数据面板（半屏宽）
+    void drawArmPanel(int x, int y, const float pos[3], uint8_t state) {
+        char buf[10];
+        uint16_t sc = (state == 1) ? C_YELLOW : (state == 2 ? C_RED : C_WHITE);
+        M5.Lcd.setTextDatum(TL_DATUM);
+        M5.Lcd.setTextSize(1);
+
+        // X
+        M5.Lcd.setTextColor(C_RED, C_BG);
+        M5.Lcd.drawString("X", x, y);
+        snprintf(buf, 10, "%+.0f", pos[0]);
+        M5.Lcd.setTextColor(sc, C_BG);
+        M5.Lcd.drawString(buf, x + 7, y);
+
+        // Y
+        M5.Lcd.setTextColor(C_GREEN, C_BG);
+        M5.Lcd.drawString("Y", x, y + 11);
+        snprintf(buf, 10, "%+.0f", pos[1]);
+        M5.Lcd.setTextColor(sc, C_BG);
+        M5.Lcd.drawString(buf, x + 7, y + 11);
+
+        // Z
+        M5.Lcd.setTextColor(0x001F, C_BG);  // 蓝色
+        M5.Lcd.drawString("Z", x, y + 22);
+        snprintf(buf, 10, "%+.0f", pos[2]);
+        M5.Lcd.setTextColor(sc, C_BG);
+        M5.Lcd.drawString(buf, x + 7, y + 22);
     }
 
     void drawMiniStick(int cx, int cy, int16_t vx, int16_t vy, uint16_t color) {
         const int R = 8;
         M5.Lcd.drawCircle(cx, cy, R, C_DARK_GRAY);
-        int dx = map(vx, -1000, 1000, -R+2, R-2);
-        int dy = map(vy, -1000, 1000, -R+2, R-2);
-        M5.Lcd.fillCircle(cx+dx, cy+dy, 2, color);
+        int dx = map(vx, -1000, 1000, -(R - 2), R - 2);
+        int dy = map(vy, -1000, 1000, -(R - 2), R - 2);
+        M5.Lcd.fillCircle(cx + dx, cy + dy, 2, color);
     }
 
     void drawGripper(int x, int y, uint8_t pct, uint16_t color) {
-        M5.Lcd.drawRect(x-8, y-4, 16, 8, C_DARK_GRAY);
+        M5.Lcd.drawRect(x - 8, y - 4, 16, 8, C_DARK_GRAY);
         int w = map(pct, 0, 100, 0, 14);
-        M5.Lcd.fillRect(x-7, y-3, w, 6, color);
+        M5.Lcd.fillRect(x - 7, y - 3, w, 6, color);
     }
 
     const char* modeName(CtrlMode m) {
-        switch(m) {
+        switch (m) {
             case MODE_CART:   return "CARTESIAN XY";
             case MODE_CART_Z: return "CARTESIAN Z";
             case MODE_ORIENT: return "ORIENTATION";
@@ -325,7 +529,7 @@ private:
     }
 
     const char* gripperName(int t) {
-        switch(t) {
+        switch (t) {
             case 0: return "xArm";
             case 1: return "BIO";
             case 2: return "Vacuum";
