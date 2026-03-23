@@ -53,6 +53,8 @@ void setup() {
     bool wifiOk = net.connectWifi(cfgMgr.cfg, 8000);
     if (!wifiOk) {
         // 无 WiFi 配置 → AP 模式 + 网页配置
+        // 先播星战字幕动画（约 4 秒），然后显示静态提示界面
+        disp.showWifiCrawl();
         disp.showWifiSetup(cfgMgr.cfg.wifi_ssid[0] ? cfgMgr.cfg.wifi_ssid : "Not set");
         net.startAPMode("FeN-Controller");
         // 等待用户通过网页配置后重启

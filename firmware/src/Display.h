@@ -39,20 +39,133 @@ public:
         M5.Lcd.drawString("Connecting...", LCD_W/2, 100);
     }
 
+    // 星战字幕滚动动效：近大远小，向上消失在灭点
+    // 调用一次播放完整动画（约 4 秒），用于 WiFi AP 模式等待期间
+    void showWifiCrawl() {
+        // 字幕内容（从下往上出现）
+        const char* lines[] = {
+            "FeN ROBOT",
+            "WIFI SETUP",
+            "",
+            "Connect to:",
+            "FeN-Controller",
+            "pw: fenrobot1",
+            "",
+            "Open browser:",
+            "192.168.4.1",
+            "",
+            "Waiting...",
+        };
+        const int N = 11;
+
+        // 使用 Sprite 双缓冲避免闪烁
+        LGFX_Sprite spr(&M5.Lcd);
+        spr.createSprite(LCD_W, LCD_H);
+
+        const int VANISH_Y  = 20;   // 灭点 Y 坐标（屏幕上方）
+        const int START_Y   = LCD_H + N * 20;  // 字幕起始位置（屏幕下方外）
+        const float SCROLL_SPEED = 1.2f;       // 每帧滚动像素
+
+        float offset = 0;
+        uint32_t lastFrame = millis();
+
+        while (offset < (float)(N * 20 + LCD_H)) {
+            uint32_t now = millis();
+            float dt = (now - lastFrame) / 16.0f;  // 相对于 ~60fps 的时间系数
+            lastFrame = now;
+            offset += SCROLL_SPEED * dt;
+
+            spr.fillScreen(C_BG);
+
+            // 绘制星点背景
+            spr.fillRect(0, 0, LCD_W, VANISH_Y, TFT_BLACK);
+
+            for (int i = 0; i < N; i++) {
+                // 每行在"世界空间"的 Y 位置（相对于灭点）
+                float worldY = (float)(START_Y - i * 22) - offset;
+
+                // 透视投影：worldY 越大（越靠下）字越大
+                // 灭点在 VANISH_Y，底部 LCD_H 处为最大尺寸
+                float t = (worldY - VANISH_Y) / (float)(LCD_H - VANISH_Y);
+                if (t <= 0.0f || t > 1.4f) continue;  // 超出视锥
+
+                int screenY = (int)(VANISH_Y + t * (LCD_H - VANISH_Y));
+                if (screenY < VANISH_Y || screenY > LCD_H + 16) continue;
+
+                // 字体大小随 t 线性变化（0.5 ~ 2）
+                float sizeF = 0.4f + t * 1.6f;
+                int   sz    = (sizeF > 1.5f) ? 2 : 1;
+
+                // 颜色：顶部（远处）暗，底部（近处）亮
+                uint8_t bright = (uint8_t)(60 + t * 195);
+                uint16_t color;
+                if (i == 0 || i == 1) {
+                    // 标题行：金黄色
+                    color = spr.color565(bright, (uint8_t)(bright * 0.85f), 0);
+                } else if (lines[i][0] == '\0') {
+                    continue;
+                } else if (strstr(lines[i], "192.168") || strstr(lines[i], "FeN-C")) {
+                    // 高亮行：紫色
+                    color = spr.color565((uint8_t)(bright * 0.8f), (uint8_t)(bright * 0.6f), bright);
+                } else {
+                    color = spr.color565(bright, bright, bright);
+                }
+
+                spr.setTextSize(sz);
+                spr.setTextColor(color);
+                spr.setTextDatum(MC_DATUM);
+                spr.drawString(lines[i], LCD_W / 2, screenY);
+            }
+
+            // 顶部黑色遮罩（制造消失感）
+            spr.fillRect(0, 0, LCD_W, VANISH_Y, TFT_BLACK);
+            // 底部轻微渐变遮罩（让新文字从下方淡入）
+            for (int y = LCD_H - 20; y < LCD_H; y++) {
+                uint8_t alpha = (uint8_t)((y - (LCD_H - 20)) * 12);
+                spr.drawFastHLine(0, y, LCD_W, spr.color565(0, 0, 0));
+            }
+
+            spr.pushSprite(0, 0);
+            delay(16);  // ~60fps
+        }
+
+        spr.deleteSprite();
+    }
+
+    // WiFi 设置静态界面（动画结束后或跳过时显示）
     void showWifiSetup(const char* ssid) {
-        M5.Lcd.fillScreen(C_BG);
-        M5.Lcd.setTextDatum(TL_DATUM);
+        M5.Lcd.fillScreen(TFT_BLACK);
+
+        // 顶部标题栏（size 2，明显可读）
+        M5.Lcd.setTextDatum(MC_DATUM);
         M5.Lcd.setTextColor(C_YELLOW);
-        M5.Lcd.setTextSize(1);
-        M5.Lcd.drawString("WiFi Setup", 4, 4);
-        M5.Lcd.setTextColor(C_WHITE);
-        M5.Lcd.drawString("SSID:", 4, 20);
-        M5.Lcd.drawString(ssid, 4, 32);
+        M5.Lcd.setTextSize(2);
+        M5.Lcd.drawString("WiFi Setup", LCD_W / 2, 14);
+
+        // 分割线
+        M5.Lcd.drawFastHLine(0, 26, LCD_W, C_GRAY);
+
+        M5.Lcd.setTextDatum(TL_DATUM);
+        M5.Lcd.setTextSize(2);
+
+        // "Connect:" 提示
         M5.Lcd.setTextColor(C_GRAY);
-        M5.Lcd.drawString("No saved WiFi.", 4, 50);
-        M5.Lcd.drawString("Use web config:", 4, 62);
+        M5.Lcd.drawString("Connect:", 4, 32);
+
+        // WiFi 名（高亮）
+        M5.Lcd.setTextColor(C_WHITE);
+        M5.Lcd.drawString("FeN-Ctrl", 4, 52);
+
+        // 分割线
+        M5.Lcd.drawFastHLine(0, 72, LCD_W, C_GRAY);
+
+        // "Open:" 提示
+        M5.Lcd.setTextColor(C_GRAY);
+        M5.Lcd.drawString("Open:", 4, 78);
+
+        // IP 地址（紫色高亮，size 2 完全放得下）
         M5.Lcd.setTextColor(C_ACCENT);
-        M5.Lcd.drawString("192.168.4.1", 4, 74);
+        M5.Lcd.drawString("192.168.4.1", 4, 98);
     }
 
     // 主界面：显示双臂状态
