@@ -218,8 +218,10 @@ void handleConfigMenu(const JoyState& js) {
     static bool prevLBtn = false;
     static bool prevRBtn = false;
     static uint32_t lastScroll = 0;
+    static int  lastDrawnItem = -1;  // 脏标记：只在选项变化时重绘
 
-    disp.showConfig(configItem, cfgMgr.cfg);
+    // 调试：输出摇杆实时值
+    Serial.printf("[JOY] lx=%d ly=%d l_btn=%d\n", js.lx, js.ly, js.l_btn);
 
     // 左摇杆 Y：滚动菜单
     if (millis() - lastScroll > 250) {
@@ -237,7 +239,14 @@ void handleConfigMenu(const JoyState& js) {
         if (abs(js.lx) > 500) {
             adjustConfigItem(configItem, js.lx > 0 ? 1 : -1);
             lastScroll = millis();
+            lastDrawnItem = -1;  // 值变了，强制重绘
         }
+    }
+
+    // 只在选项变化时重绘（消除闪烁）
+    if (configItem != lastDrawnItem) {
+        disp.showConfig(configItem, cfgMgr.cfg);
+        lastDrawnItem = configItem;
     }
 
     // 左摇杆按下：确认选中
@@ -255,10 +264,16 @@ void handleConfigMenu(const JoyState& js) {
     }
     prevLBtn = js.l_btn;
 
-    // 正面键退出配置
-    if (M5.BtnA.wasReleased()) {
+    // 正面键短按退出配置（进入时长按>1.5s，所以松开时已不是 wasReleased 的时机）
+    // 改为：进入后需再次短按正面键才退出，避免长按松开立刻退出
+    static bool configExitArmed = false;
+    if (!M5.BtnA.isPressed()) {
+        configExitArmed = true;  // 按键已松开，之后的短按才算退出
+    }
+    if (configExitArmed && M5.BtnA.wasReleased()) {
         cfgMgr.save();
         inConfigMenu = false;
+        configExitArmed = false;
         mode = MODE_CART;
     }
 
