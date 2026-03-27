@@ -1,8 +1,70 @@
 #pragma once
 #include <M5Unified.h>
+#include <LittleFS.h>
+#include <AnimatedGIF.h>
 #include "Protocol.h"
 #include "Config.h"
 #include "logo_panbotica.h"
+#include "boot_frame.h"
+
+// ── GIF 播放器（流式解码，无需全量加载入 RAM）────────────────────
+static AnimatedGIF _gif;
+static File        _gifFile;
+
+static void* _gifOpen(const char* path, int32_t* pSize) {
+    _gifFile = LittleFS.open(path, "r");
+    if (!_gifFile) return nullptr;
+    *pSize = _gifFile.size();
+    return (void*)&_gifFile;
+}
+static void _gifClose(void* pHandle) {
+    File* f = static_cast<File*>(pHandle);
+    if (f) f->close();
+}
+static int32_t _gifRead(GIFFILE* pFile, uint8_t* buf, int32_t len) {
+    File* f = static_cast<File*>(pFile->fHandle);
+    // 避免读超过文件尾
+    int32_t available = pFile->iSize - pFile->iPos;
+    if (len > available) len = available;
+    if (len <= 0) return 0;
+    int32_t n = (int32_t)f->read(buf, len);
+    pFile->iPos = (int32_t)f->position();  // 必须更新，否则库误判 EOF
+    return n;
+}
+static int32_t _gifSeek(GIFFILE* pFile, int32_t pos) {
+    File* f = static_cast<File*>(pFile->fHandle);
+    f->seek(pos);
+    pFile->iPos = (int32_t)f->position();  // 必须更新
+    return pFile->iPos;
+}
+static void _gifDraw(GIFDRAW* pDraw) {
+    static uint16_t lineBuf[128];
+    uint16_t* pal = pDraw->pPalette;
+    uint8_t*  s   = pDraw->pPixels;
+    int       y   = pDraw->iY + pDraw->y;
+    int       w   = pDraw->iWidth;
+
+    if (pDraw->ucHasTransparency) {
+        // 透明像素跳过不画（保留背景），非透明像素连续批量绘制
+        uint8_t trans = pDraw->ucTransparent;
+        int x = 0;
+        while (x < w) {
+            // 跳过透明像素
+            while (x < w && s[x] == trans) x++;
+            if (x >= w) break;
+            // 收集连续不透明像素
+            int start = x;
+            int count = 0;
+            while (x < w && s[x] != trans) {
+                lineBuf[count++] = pal[s[x++]];
+            }
+            M5.Lcd.drawBitmap(pDraw->iX + start, y, count, 1, lineBuf);
+        }
+    } else {
+        for (int i = 0; i < w; i++) lineBuf[i] = pal[s[i]];
+        M5.Lcd.drawBitmap(pDraw->iX, y, w, 1, lineBuf);
+    }
+}
 
 // AtomS3 LCD: 128x128 像素
 #define LCD_W  128
@@ -29,9 +91,32 @@ public:
     }
 
     // ── 开机动画 ──────────────────────────────────────────────────
-    // 机器人剪影 + "FeN RC" 标题 + Panbotica logo
-    // 动画约 2 秒：双臂从中间向两侧展开，标题淡入
+    // 优先播放 LittleFS 中的 boot.gif，失败则回退到代码绘制动画
     void showBoot() {
+        if (LittleFS.begin(false)) {
+            if (LittleFS.exists("/boot.gif")) {
+                M5.Lcd.fillScreen(TFT_BLACK);
+                _gif.begin(GIF_PALETTE_RGB565_LE);
+                if (_gif.open("/boot.gif", _gifOpen, _gifClose,
+                              _gifRead, _gifSeek, _gifDraw)) {
+                    int frameDelay = 0;
+                    while (_gif.playFrame(false, &frameDelay)) {
+                        if (frameDelay > 0) delay(frameDelay);
+                        yield();  // 喂看门狗，防止 WDT reset
+                    }
+                    _gif.close();
+                }
+                LittleFS.end();
+                _drawBootStatic(0);
+                return;
+            }
+            LittleFS.end();
+        }
+        // 回退：代码绘制动画
+        _showBootFallback();
+    }
+
+    void _showBootFallback() {
         LGFX_Sprite spr(&M5.Lcd);
         spr.createSprite(LCD_W, LCD_H);
 
@@ -418,39 +503,28 @@ private:
     void _drawBootStatic(int dots) {
         M5.Lcd.fillScreen(C_BG);
 
-        // 标题
+        // 标题："FeN" 大字 + "©" 上标
         M5.Lcd.setTextDatum(MC_DATUM);
         M5.Lcd.setTextColor(C_ACCENT, C_BG);
         M5.Lcd.setTextSize(2);
-        M5.Lcd.drawString("FeN", 50, 10);
+        M5.Lcd.drawString("FeN", LCD_W / 2 - 6, 10);
         M5.Lcd.setTextSize(1);
         M5.Lcd.setTextColor(C_WHITE, C_BG);
-        M5.Lcd.drawString("RC", 79, 6);
+        M5.Lcd.drawString("\xA9", LCD_W / 2 + 16, 4);   // © 上标
 
         // 副标题
         M5.Lcd.setTextColor(C_GRAY, C_BG);
-        M5.Lcd.drawString("Dual Arm Robot", LCD_W / 2, 24);
+        M5.Lcd.drawString("Controller", LCD_W / 2, 24);
 
-        // 机器人简化剪影（静态，与动画结束帧一致）
-        const int cx = 64, bodyY = 72;
-        uint16_t col = M5.Lcd.color565(110, 60, 180);
-        M5.Lcd.fillRoundRect(cx - 8,  bodyY - 22, 16, 14, 3, col);
-        M5.Lcd.fillRect     (cx - 3,  bodyY -  9,  6,  5,    col);
-        M5.Lcd.fillRoundRect(cx - 12, bodyY -  4, 24, 20, 3, col);
-        M5.Lcd.fillRect     (cx - 9,  bodyY + 16,  6, 10,    col);
-        M5.Lcd.fillRect     (cx + 3,  bodyY + 16,  6, 10,    col);
-        M5.Lcd.fillRect     (cx - 11, bodyY + 25,  9,  4,    col);
-        M5.Lcd.fillRect     (cx + 2,  bodyY + 25,  9,  4,    col);
-        // 眼睛
-        M5.Lcd.fillCircle(cx - 3, bodyY - 16, 2, C_CYAN);
-        M5.Lcd.fillCircle(cx + 3, bodyY - 16, 2, C_CYAN);
-        // 双臂（展开后固定位置）
-        M5.Lcd.drawLine(cx - 12, bodyY + 2, cx - 38, bodyY + 10, col);
-        M5.Lcd.drawLine(cx - 38, bodyY + 10, cx - 46, bodyY + 16, col);
-        M5.Lcd.fillCircle(cx - 46, bodyY + 16, 2, col);
-        M5.Lcd.drawLine(cx + 12, bodyY + 2, cx + 38, bodyY + 10, col);
-        M5.Lcd.drawLine(cx + 38, bodyY + 10, cx + 46, bodyY + 16, col);
-        M5.Lcd.fillCircle(cx + 46, bodyY + 16, 2, col);
+        // 机器人图像（GIF 最后一帧缩小到 60×60，居中显示）
+        const int imgX = (LCD_W - BOOT_FRAME_W) / 2;
+        const int imgY = 32;
+        for (int row = 0; row < BOOT_FRAME_H; row++) {
+            for (int col = 0; col < BOOT_FRAME_W; col++) {
+                uint16_t px = pgm_read_word(&BOOT_FRAME[row][col]);
+                M5.Lcd.drawPixel(imgX + col, imgY + row, px);
+            }
+        }
 
         // Panbotica logo
         int logoX = (LCD_W - LOGO_W) / 2;
